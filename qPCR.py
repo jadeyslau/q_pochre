@@ -1,14 +1,14 @@
 import pandas as pd, numpy as np
 import re
+
 from os import path
 from numpy import mean, std, power, asarray, log
 
-
-import seaborn as sns
-import matplotlib.pyplot as plt
+# import seaborn as sns
+# import matplotlib.pyplot as plt
 
 from math import isnan
-from numpy import mean, std, power, asarray, log
+# from numpy import mean, std, power, asarray, log
 
 from scipy import stats
 from scipy.stats.mstats import gmean
@@ -31,7 +31,7 @@ def trim_all_columns(df):
     trim_strings = lambda x: x.strip() if isinstance(x, str) else x
     return df.applymap(trim_strings)
 
-def tidy_df(df, treatment):
+def tidy_df(df, treatment=False):
     """
     This function performs some rudimentary housekeeping on the raw Lightcycler exported data.
     It removes trailing whitespace in column headers, removes extraneous columns, renames columns as per rename_column,
@@ -99,10 +99,6 @@ def tidy_df(df, treatment):
     df = df[columns_titles]
     return df
 
-# Create DeltaCt column from Ct Mean (e.g. actinCt - targetCt )
-# Column for relative expression 2^DeltaCt
-# Plot that.
-
 # log2 = lambda x: log(x)/log(2)
 
 def average_cq(seq, efficiency=1.0):
@@ -121,10 +117,15 @@ def average_cq(seq, efficiency=1.0):
     :rtype: float
     """
     denominator = sum( [pow(2.0*efficiency, -Ci) for Ci in seq] )
+    # print(denominator)
     # Make sure values passed in seq are ints
     avg_cq = log(len(seq)/denominator)/log(2.0*efficiency)
-    # TODO return sem and sd as well
     return avg_cq
+
+# list1 = [23.94,23.7,23.48]
+# # list2 = [17.01,16.84,15.88]
+# average_cq(list1)
+# np.mean(list1)
 
 def sem_cq(seq):
     sem = stats.sem(seq)
@@ -188,10 +189,11 @@ def rel_expression_ddcq(sample_frame, ref_target):
                 ref_gene_cq    = ref_target_stats_by_sample.loc[age]['average_cq'][0]
                 ref_gene_sd    = ref_target_stats_by_sample.loc[age]['sd_cq'][0]
 
-                mean_by_sample = group['Cq'].agg(average_cq)
+                # mean_by_sample = group['Cq'].agg(average_cq)
+                mean_by_sample = group['Cq'].agg(np.mean)
                 sem_by_sample  = sem_cq(group['Cq'])
                 sd_by_sample   = sd_cq(group['Cq'])
-
+                print(mean_by_sample, 'end')
 #                 sample_dcq     = mean_by_sample - ref_gene_cq
 #                 sample_dcq_sd  = sd_by_sample - ref_gene_sd
 #                 rel_exp     = power(2, -sample_dcq)
@@ -220,7 +222,7 @@ def rel_expression_ddcq(sample_frame, ref_target):
 
 # testdf          = df
 # print(df)
-# df_relexp       = rel_expression_ddcq(testdf, 'GRIN1A')
+# df_relexp       = rel_expression_ddcq(testdf, 'BACTIN')
 # df_exclude_negs = df_relexp.loc[(df_relexp['Target'] != 'BACTIN') & (df_relexp['Condition'] != 'NEG')]
 
 # norm to bacin then grin1a?
