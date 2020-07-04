@@ -6,11 +6,12 @@ from scipy.stats.mstats import gmean
 import seaborn as sns
 
 class Data:
-    def __init__(self, data_path, fname_arr, ref_gene, bio_ref, treated=True):
+    def __init__( self, data_path, fname_arr, ref_gene, bio_ref, cntl_grp, treated=True ):
         self.data_path = data_path
         self.fname_arr = fname_arr
         self.ref_gene  = ref_gene
-        self.bio_ref  = bio_ref
+        self.bio_ref   = bio_ref
+        self.cntl_grp  = cntl_grp
         self.treated   = treated
 
     log2 = lambda self,x: log(x)/log(2)
@@ -146,7 +147,7 @@ class Data:
 
     # analyse here
 
-    def get_ref_data(self,df,relevant_cols,relevant_grps):
+    def get_ref_data( self, df, relevant_cols, relevant_grps ):
 
         # select relevant columns from reference gene data and find mean of technical replicates
         ref_target_df             = df.loc[df['Target'] == self.ref_gene, relevant_cols]
@@ -156,13 +157,13 @@ class Data:
 
         return ref_target_mean_by_sample, ref_target_mean_by_treat
 
-    def get_ref_mean(self, ref_mean_df, age, biorep, treatment):
+    def get_ref_mean( self, ref_mean_df, age, biorep, treatment ):
         ref_mean_by_age = ref_mean_df.loc[[age, 'amean_cq']].reset_index()
         ref_mean_cq     = ref_mean_by_age[(ref_mean_by_age['Bio Rep'] == biorep) & (ref_mean_by_age['Treatment'] == treatment)]
         return ref_mean_cq
 
-    def ddcq(self, ref_mean_cq, sample_mean_cq):
-        dcq  = ref_mean_cq - sample_mean_cq
+    def get_ddcq( self, control_avg, sample):
+        dcq  = control_avg - sample
         ddcq = float(power(2, dcq))
         return ddcq
 
@@ -181,7 +182,7 @@ class Data:
         return concatenated
 
 #--------------------------------------------------------------------------------------------
-    def calculate_mean_cq(self,df,ref_sample_grouped_by_age,ref_target_mean_by_sample):
+    def calculate_mean_cq( self, df, ref_sample_grouped_by_age, ref_target_mean_by_sample ):
         # define conditions and initiate empty array and df
         unique_cond = df.Condition.unique()
         mean_cq_df       = pd.DataFrame({
@@ -190,7 +191,8 @@ class Data:
                                    'Target'   : [],
                                    'Age'      : [],
                                    'Mean Cq'  : [],
-                                   'Treatment': []
+                                   'Treatment': [],
+                                   'Plate'    : []
                                   })
 
         # iterate through unique 'conditions' i.e. ages and NEG, calculate relative quantity, and
@@ -200,24 +202,33 @@ class Data:
                     sample         = condition[1]
                     biorep         = group['Bio Rep'].unique()[0]
                     treatment      = group['Treatment'].unique()[0]
+                    plate          = int(group['Plate'].unique()[0])
 
                     ref_mean_cq    = self.get_ref_mean(ref_target_mean_by_sample, age, biorep, treatment)['Cq']
                     sample_mean_cq = self.amean_cq(group['Cq']) # arithmetic mean of tech reps
 
-
                     # Normalise to reference gene and
                     # RQ = self.ddcq(ref_mean_cq, sample_mean_cq)
-
                     mean_cq_df = mean_cq_df.append({
                                            'Sample'   : sample,
                                            'Bio Rep'  : biorep,
                                            'Target'   : group['Target'].unique()[0],
                                            'Age'      : age,
                                            'Mean Cq'  : sample_mean_cq,
-                                           'Treatment': treatment
+                                           'Treatment': treatment,
+                                           'Plate'    : plate
                                          },ignore_index=True)
 
         return mean_cq_df
+
+    def get_average_cq_per_target_for_cntl_grps(self, df):
+        """
+        """
+        filter_controls_only = df.loc[df['Treatment'] == self.cntl_grp].sort_values(by=['Plate', 'Target', 'Age']).drop('Bio Rep', axis=1)
+        grouped_averaged = filter_controls_only.groupby(['Plate', 'Age', 'Target']).agg(self.amean_cq)
+        # group by age target and plate
+
+        return grouped_averaged
 
     def calculate_RQ(self):
         """Description
@@ -229,6 +240,7 @@ class Data:
         """
         df       = self.tidy_each_experiment()
         if len(df) > 1: df = self.concat_df(df)
+        n_plates = len(df)+1
 
         ref_gene = self.ref_gene
         relevant_cols = ['Sample', 'Cq', 'Condition', 'Bio Rep', 'Plate']
@@ -241,10 +253,30 @@ class Data:
 
         ref_sample_grouped_by_age = df.groupby(relevant_grps)
 
-        mean_cq_df = self.calculate_mean_cq(df,ref_sample_grouped_by_age,ref_target_mean_by_sample).sort_values(['Age', 'Target', 'Treatment'])
+        # Get the mean of all the technical reps
+        avg_cq_df = self.calculate_mean_cq(df,ref_sample_grouped_by_age,ref_target_mean_by_sample).sort_values(['Plate', 'Age', 'Target', 'Treatment'])
 
         # Control group Avg Cq per Target
-        return mean_cq_df
+        avg_control_cq_df = self.get_average_cq_per_target_for_cntl_grps(avg_cq_df)
+
+        RQ_list = []
+        # iterate through unique 'conditions' i.e. ages and NEG, calculate relative quantity, and
+        for index, sample in avg_cq_df.iterrows():
+            plate   = sample['Plate']
+            age     = sample['Age']
+            target  = sample['Target']
+            mean_cq = sample['Mean Cq']
+
+            avg_control_cq = avg_control_cq_df.loc[plate, age, target]
+
+            RQ = self.get_ddcq(avg_control_cq, mean_cq)
+
+            RQ_list.append(RQ)
+
+        results_df = avg_cq_df
+        results_df['RQ'] = RQ_list
+
+        return results_df
 
     def normalise_to_bio_ref(self):
         # normalisation factor is the experimentally relevant group such as untreated control
